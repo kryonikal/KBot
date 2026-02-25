@@ -1,0 +1,100 @@
+{
+  "serverName": "Norsk Gaming Community",
+  "roles": [
+    { "name": "Verified", "color": "Green", "hoist": false, "mentionable": false },
+    { "name": "Moderator", "color": "Blue", "hoist": true, "mentionable": false },
+    { "name": "Admin", "color": "Red", "hoist": true, "mentionable": false },
+    { "name": "Raidleder", "color": "DarkRed", "hoist": true, "mentionable": true },
+
+    { "name": "Casual", "color": "Grey", "hoist": false, "mentionable": false },
+
+    { "name": "Tank", "color": "DarkGold", "hoist": false, "mentionable": true },
+    { "name": "Healer", "color": "Purple", "hoist": false, "mentionable": true },
+    { "name": "DPS", "color": "Orange", "hoist": false, "mentionable": true },
+
+    { "name": "TBC Anniversary", "color": "Aqua", "hoist": false, "mentionable": true },
+    { "name": "MoP Classic", "color": "DarkGreen", "hoist": false, "mentionable": true },
+    { "name": "WoW Classic", "color": "Grey", "hoist": false, "mentionable": true },
+
+    { "name": "Main: Warrior", "color": "#C79C6E", "hoist": false, "mentionable": false },
+    { "name": "Main: Paladin", "color": "#F58CBA", "hoist": false, "mentionable": false },
+    { "name": "Main: Hunter", "color": "#ABD473", "hoist": false, "mentionable": false },
+    { "name": "Main: Rogue", "color": "#FFF569", "hoist": false, "mentionable": false },
+    { "name": "Main: Priest", "color": "#FFFFFF", "hoist": false, "mentionable": false },
+    { "name": "Main: Shaman", "color": "#0070DE", "hoist": false, "mentionable": false },
+    { "name": "Main: Mage", "color": "#69CCF0", "hoist": false, "mentionable": false },
+    { "name": "Main: Warlock", "color": "#9482C9", "hoist": false, "mentionable": false },
+    { "name": "Main: Druid", "color": "#FF7D0A", "hoist": false, "mentionable": false },
+
+    { "name": "Alt: Warrior", "hoist": false, "mentionable": false },
+    { "name": "Alt: Paladin", "hoist": false, "mentionable": false },
+    { "name": "Alt: Hunter", "hoist": false, "mentionable": false },
+    { "name": "Alt: Rogue", "hoist": false, "mentionable": false },
+    { "name": "Alt: Priest", "hoist": false, "mentionable": false },
+    { "name": "Alt: Shaman", "hoist": false, "mentionable": false },
+    { "name": "Alt: Mage", "hoist": false, "mentionable": false },
+    { "name": "Alt: Warlock", "hoist": false, "mentionable": false },
+    { "name": "Alt: Druid", "hoist": false, "mentionable": false },
+
+    { "name": "CL: Warrior", "hoist": true, "mentionable": true },
+    { "name": "CL: Paladin", "hoist": true, "mentionable": true },
+    { "name": "CL: Hunter", "hoist": true, "mentionable": true },
+    { "name": "CL: Rogue", "hoist": true, "mentionable": true },
+    { "name": "CL: Priest", "hoist": true, "mentionable": true },
+    { "name": "CL: Shaman", "hoist": true, "mentionable": true },
+    { "name": "CL: Mage", "hoist": true, "mentionable": true },
+    { "name": "CL: Warlock", "hoist": true, "mentionable": true },
+    { "name": "CL: Druid", "hoist": true, "mentionable": true }
+  ],
+  "categories": [
+    {
+      "name": "START HER",
+      "channels": [
+        { "type": "text", "name": "velkommen" },
+        { "type": "text", "name": "regler" },
+        { "type": "text", "name": "verifisering" },
+        { "type": "text", "name": "velg-roller" }
+      ]
+    },
+    {
+      "name": "COMMUNITY",
+      "channels": [
+        { "type": "text", "name": "prat" },
+        { "type": "text", "name": "gaming-generelt" },
+        { "type": "text", "name": "looking-for-group" },
+        { "type": "text", "name": "media" },
+        { "type": "text", "name": "minecraft" },
+        { "type": "text", "name": "spill-forslag" },
+        { "type": "text", "name": "changelog" }
+      ]
+    },
+    {
+      "name": "WORLD OF WARCRAFT",
+      "channels": [
+        { "type": "text", "name": "wow-prat" },
+        { "type": "text", "name": "lfg" },
+        { "type": "text", "name": "signups" },
+        { "type": "text", "name": "class-help" },
+        { "type": "text", "name": "professions" }
+      ]
+    },
+    {
+      "name": "STEMME",
+      "channels": [
+        { "type": "voice", "name": "🔊 General" },
+        { "type": "voice", "name": "🔊 Gaming" },
+        { "type": "voice", "name": "🔊 WoW" },
+        { "type": "voice", "name": "🔊 Raid" },
+        { "type": "voice", "name": "🔇 AFK" }
+      ]
+    },
+    {
+      "name": "STAFF",
+      "channels": [
+        { "type": "text", "name": "staff-chat" },
+        { "type": "text", "name": "mod-log" },
+        { "type": "text", "name": "bot-log" }
+      ]
+    }
+  ]
+}

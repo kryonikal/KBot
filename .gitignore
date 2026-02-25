@@ -1,0 +1,4 @@
+node_modules/
+.env
+data/events.json
+.DS_Store
