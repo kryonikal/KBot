@@ -14,6 +14,7 @@ import { buildCommands } from "./commands.js";
 import { applyTemplate } from "./setup.js";
 import { postVerifyMessage, VERIFY_BUTTON_ID } from "./verify.js";
 import { setupLogging } from "./logging.js";
+import { getConfig, setConfig } from "./config.js";
 
 import {
   handleEventButton,
@@ -51,8 +52,13 @@ const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error("Mangler DISCORD_TOKEN i .env");
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages],
-  partials: [Partials.Channel, Partials.Message]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions
+  ],
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User]
 });
 
 setupLogging(client);
@@ -97,11 +103,33 @@ async function clearByNames(guild, member, names) {
   }
 }
 
+async function getRulesMessage(guild) {
+  const cfg = getConfig();
+  const rulesMessageId = cfg.rulesMessageId;
+  if (!rulesMessageId) return { rulesMessageId: null, rulesChannel: null, rulesMsg: null };
+
+  const rulesChannel = findTextChannel(guild, "regler");
+  if (!rulesChannel) return { rulesMessageId, rulesChannel: null, rulesMsg: null };
+
+  const rulesMsg = await rulesChannel.messages.fetch(rulesMessageId).catch(() => null);
+  return { rulesMessageId, rulesChannel, rulesMsg };
+}
+
 client.on("interactionCreate", async (interaction) => {
   try {
     // Slash commands
     if (interaction.isChatInputCommand()) {
-      if (["setup", "apply", "post-verify", "post-role-menus", "post-welcome", "post-commands"].includes(interaction.commandName)) {
+      if (
+        [
+          "setup",
+          "apply",
+          "post-verify",
+          "post-role-menus",
+          "post-welcome",
+          "post-commands",
+          "post-regler"
+        ].includes(interaction.commandName)
+      ) {
         if (!canManageServer(interaction.member)) throw new Error("Ingen tilgang (krever Admin/Moderator/Raidleder).");
       }
 
@@ -136,13 +164,14 @@ client.on("interactionCreate", async (interaction) => {
         if (!ch) throw new Error("Fant ikke #velkommen.");
 
         const msg = await ch.send(
-`👋 **Velkommen til ${interaction.guild.name}!**
+          `👋 **Velkommen til ${interaction.guild.name}!**
 
 Dette er et norsk gaming-community (WoW + andre spill).
 
 **Start her:**
-1️⃣ Gå til **#verifisering** og trykk “Jeg godtar reglene”.
-2️⃣ Gå til **#velg-roller** og velg class/roller.
+1️⃣ Gå til **#regler** og reager ✅
+2️⃣ Gå til **#verifisering** og trykk “Jeg godtar reglene”.
+3️⃣ Gå til **#velg-roller** og velg class/roller.
 
 **Hvor går du nå?**
 • Generell prat → #prat
@@ -163,8 +192,7 @@ Skriv gjerne hei i #prat og si hva du spiller 👋`
         const ch = findTextChannel(interaction.guild, "commands");
         if (!ch) throw new Error("Fant ikke #commands.");
 
-        const text =
-`**KBot – Kommandooversikt**
+        const text = `**KBot – Kommandooversikt**
 
 **Server / oppsett**
 • /setup – bygger/oppdater serverstruktur (idempotent)
@@ -173,6 +201,7 @@ Skriv gjerne hei i #prat og si hva du spiller 👋`
 • /post-role-menus – poster rollepanel i #velg-roller
 • /post-welcome – poster og pinner velkomst i #velkommen
 • /post-commands – poster/oppdater denne oversikten i #commands
+• /post-regler – poster regler i #regler (✅ kreves før verifisering)
 
 **Changelog**
 • /changelog post text:<tekst> – poster i #changelog
@@ -208,6 +237,34 @@ Skriv gjerne hei i #prat og si hva du spiller 👋`
         }
 
         await interaction.editReply("✅ #commands er oppdatert (og pinnet).");
+        return;
+      }
+
+      if (interaction.commandName === "post-regler") {
+        await interaction.deferReply({ ephemeral: true });
+
+        const ch = findTextChannel(interaction.guild, "regler");
+        if (!ch) throw new Error("Fant ikke #regler.");
+
+        const msg = await ch.send(
+          `📜 **Regler**
+
+1. Vis respekt. Uenighet er greit – personangrep og hets er ikke.
+2. Nulltoleranse for diskriminering og NSFW.
+3. Hold det ryddig: riktig kanal, ingen spam/masse-tagging.
+4. Events/LFG: meld deg kun på om du møter. Si ifra tidlig hvis du ikke kan.
+5. Konflikter tas i DM – ikke offentlig drama.
+6. **Admin/Mod har siste ord.**
+   Moderasjonsavgjørelser diskuteres ikke i offentlig kanal. Ta det i DM.
+   Omgåelse av straff → permanent ban.
+
+✅ Reager med ✅ på denne meldingen før du kan verifisere deg.`
+        );
+
+        await msg.react("✅").catch(() => {});
+        setConfig({ rulesMessageId: msg.id });
+
+        await interaction.editReply("✅ Regler postet og lagret (✅ kreves før verifisering).");
         return;
       }
 
@@ -329,12 +386,43 @@ Skriv gjerne hei i #prat og si hva du spiller 👋`
 
     // Buttons
     if (interaction.isButton()) {
-      // Verify
       if (interaction.customId === VERIFY_BUTTON_ID) {
         const role = interaction.guild.roles.cache.find((r) => r.name === "Verified");
         if (!role) throw new Error("Mangler Verified. Kjør /setup.");
 
         const member = await interaction.guild.members.fetch(interaction.user.id);
+
+        // Require ✅ reaction on persisted rules message first
+        const { rulesMessageId, rulesMsg } = await getRulesMessage(interaction.guild);
+
+        if (!rulesMessageId) {
+          await interaction.reply({
+            content: "Regler er ikke satt opp enda. Admin må kjøre /post-regler.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (!rulesMsg) {
+          await interaction.reply({
+            content: "Regel-meldingen finnes ikke lenger (slettet?). Admin må kjøre /post-regler på nytt.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        const reaction =
+          rulesMsg.reactions.cache.get("✅") ?? rulesMsg.reactions.cache.find((r) => r.emoji?.name === "✅");
+        const users = reaction ? await reaction.users.fetch().catch(() => null) : null;
+
+        if (!users || !users.has(interaction.user.id)) {
+          await interaction.reply({
+            content: "Du må reagere med ✅ på regelen i #regler før du kan verifisere deg.",
+            ephemeral: true
+          });
+          return;
+        }
+
         if (member.roles.cache.has(role.id)) {
           await interaction.reply({ content: "Du er allerede verifisert.", ephemeral: true });
           return;
@@ -453,7 +541,7 @@ Skriv gjerne hei i #prat og si hva du spiller 👋`
         return;
       }
 
-      // Event leave
+      // Event leave / other event buttons
       if (interaction.customId.startsWith("event_")) {
         await handleEventButton(interaction);
         return;
