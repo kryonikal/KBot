@@ -160,30 +160,80 @@ client.on("interactionCreate", async (interaction) => {
 
       if (interaction.commandName === "post-welcome") {
         await interaction.deferReply({ ephemeral: true });
-        const ch = findTextChannel(interaction.guild, "velkommen");
-        if (!ch) throw new Error("Fant ikke #velkommen.");
 
-        const msg = await ch.send(
-          `👋 **Velkommen til ${interaction.guild.name}!**
+        const welcomeCh = findTextChannel(interaction.guild, "velkommen");
+        if (!welcomeCh) throw new Error("Fant ikke #velkommen.");
+
+        // Resolve channels by name and use real mentions (<#id>) so the message stays correct even if channels are renamed.
+        const reglerCh = findTextChannel(interaction.guild, "regler");
+        const verifyCh = findTextChannel(interaction.guild, "verifisering");
+        const rolesCh = findTextChannel(interaction.guild, "velg-roller");
+
+        const pratCh = findTextChannel(interaction.guild, "prat");
+        const wowPratCh = findTextChannel(interaction.guild, "wow-prat");
+        const lfgCh = findTextChannel(interaction.guild, "lfg");
+        const signupsCh = findTextChannel(interaction.guild, "signups");
+        const forslagCh = findTextChannel(interaction.guild, "spill-forslag");
+
+        const chMention = (ch, fallbackName) => (ch ? `<#${ch.id}>` : `#${fallbackName}`);
+
+        const content = `👋 **Velkommen til ${interaction.guild.name}!**
 
 Dette er et norsk gaming-community (WoW + andre spill).
 
 **Start her:**
-1️⃣ Gå til **#regler** og reager ✅
-2️⃣ Gå til **#verifisering** og trykk “Jeg godtar reglene”.
-3️⃣ Gå til **#velg-roller** og velg class/roller.
+1️⃣ Gå til ${chMention(reglerCh, "regler")} og reager ✅
+2️⃣ Gå til ${chMention(verifyCh, "verifisering")} og trykk “Jeg godtar reglene”.
+3️⃣ Gå til ${chMention(rolesCh, "velg-roller")} og velg class/roller.
 
 **Hvor går du nå?**
-• Generell prat → #prat
-• WoW → #wow-prat
-• Finn gruppe → #lfg / #signups
-• Foreslå spill → #spill-forslag
+• Generell prat → ${chMention(pratCh, "prat")}
+• WoW → ${chMention(wowPratCh, "wow-prat")}
+• Finn gruppe → ${chMention(lfgCh, "lfg")}${signupsCh ? ` / ${chMention(signupsCh, "signups")}` : ""}
+• Foreslå spill → ${chMention(forslagCh, "spill-forslag")}
 
-Skriv gjerne hei i #prat og si hva du spiller 👋`
-        );
+Skriv gjerne hei i ${chMention(pratCh, "prat")} og si hva du spiller 👋`;
+
+        // Upsert: edit existing pinned welcome message if we have it, otherwise create a new one.
+        const cfg = getConfig();
+        const existingId = cfg.welcomeMessageId;
+        let msg = null;
+
+        // If we don't have an ID stored yet, try to find an existing pinned welcome message posted by the bot.
+        if (!existingId) {
+          const pinned = await welcomeCh.messages.fetchPinned().catch(() => null);
+          const existingPinned = pinned?.find(
+            (m) => m.author.id === interaction.client.user.id && m.content?.startsWith("👋 **Velkommen")
+          );
+          if (existingPinned) {
+            msg = existingPinned;
+            await msg.edit(content);
+            setConfig({ welcomeMessageId: msg.id, welcomeChannelId: welcomeCh.id });
+          }
+        }
+
+        if (existingId && !msg) {
+          // Prefer fetching from the stored channel if present, otherwise from #velkommen.
+          const storedChannelId = cfg.welcomeChannelId;
+          const ch = storedChannelId ? await interaction.client.channels.fetch(storedChannelId).catch(() => null) : null;
+          const sourceCh = ch && ch.isTextBased() ? ch : welcomeCh;
+
+          msg = await sourceCh.messages.fetch(existingId).catch(() => null);
+          if (msg) {
+            await msg.edit(content);
+          }
+        }
+
+        if (!msg) {
+          msg = await welcomeCh.send(content);
+          setConfig({ welcomeMessageId: msg.id, welcomeChannelId: welcomeCh.id });
+        } else {
+          // Keep channelId fresh in case #velkommen was recreated.
+          setConfig({ welcomeChannelId: welcomeCh.id });
+        }
 
         await msg.pin().catch(() => {});
-        await interaction.editReply("✅ Velkomstmelding postet og pinnet.");
+        await interaction.editReply("✅ Velkomstmelding oppdatert (edit/upsert) og pinnet.");
         return;
       }
 
