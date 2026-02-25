@@ -65,13 +65,13 @@ export async function applyTemplate(guild) {
   const raidleader = roleMap["Raidleder"];
 
   if (!verified || !mod || !admin || !raidleader) {
-    throw new Error("Mangler kjerne-roller (Verified/Moderator/Admin/Raidleder). Kjør /setup igjen.");
+    throw new Error("Mangler kjerne-roller (Verified/Moderator/Admin/Raidleder).");
   }
 
-  // Permissions model:
-  // - Unverified: only START HER
-  // - Verified: sees everything except STAFF
-  // - STAFF category: only mod/admin/raidleader
+  // Visibility model:
+  // - Unverified: START HER only
+  // - Verified: all except STAFF
+  // - STAFF: only mod/admin/raidleader
   const hideToUnverified = [
     { id: everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
     { id: verified.id, allow: [PermissionsBitField.Flags.ViewChannel] },
@@ -106,6 +106,7 @@ export async function applyTemplate(guild) {
     for (const ch of cat.channels) {
       let overwrites = catOverwrites;
 
+      // Read-only channels
       if (ch.type === "text" && readOnlyChannels.has(ch.name)) {
         overwrites = [
           ...catOverwrites,
@@ -117,8 +118,8 @@ export async function applyTemplate(guild) {
         ];
       }
 
+      // #changelog is read-only for non-staff
       if (ch.type === "text" && ch.name === changelogName) {
-        // read-only for everyone except Admin/Mod/Raidleder
         overwrites = [
           ...catOverwrites,
           { id: everyone.id, deny: [PermissionsBitField.Flags.SendMessages] },
@@ -126,6 +127,32 @@ export async function applyTemplate(guild) {
           { id: mod.id, allow: [PermissionsBitField.Flags.SendMessages] },
           { id: admin.id, allow: [PermissionsBitField.Flags.SendMessages] },
           { id: raidleader.id, allow: [PermissionsBitField.Flags.SendMessages] }
+        ];
+      }
+
+      // SPECIAL: #commands is Admin-only (plus bot)
+      if (cat.name === "STAFF" && ch.type === "text" && ch.name === "commands") {
+        overwrites = [
+          { id: everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: verified.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: mod.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: raidleader.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          {
+            id: admin.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory
+            ]
+          },
+          {
+            id: guild.members.me.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory
+            ]
+          }
         ];
       }
 

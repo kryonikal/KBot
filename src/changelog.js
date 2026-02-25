@@ -9,11 +9,8 @@ function canPost(member) {
 
 export async function postChangelog(interaction, text) {
   if (!canPost(interaction.member)) throw new Error("Ingen tilgang til changelog.");
-
   const channel = interaction.guild.channels.cache.find((c) => c.name === "changelog");
   if (!channel || !channel.isTextBased()) throw new Error("Fant ikke #changelog.");
-
   const embed = new EmbedBuilder().setTitle("Changelog").setDescription(text);
-
   await channel.send({ embeds: [embed] });
 }

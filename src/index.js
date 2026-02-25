@@ -4,17 +4,48 @@ import {
   GatewayIntentBits,
   Partials,
   REST,
-  Routes
+  Routes,
+  PermissionsBitField,
+  StringSelectMenuBuilder,
+  ActionRowBuilder
 } from "discord.js";
 
 import { buildCommands } from "./commands.js";
 import { applyTemplate } from "./setup.js";
 import { postVerifyMessage, VERIFY_BUTTON_ID } from "./verify.js";
-import { postRoleMenus, ROLE_MENU, roleNameForAltClass, roleNameForMainClass, MAIN_CLASSES, ALT_CLASSES, WOW_ROLES, WOW_VERSIONS, COMMUNITY_ROLES } from "./roles.js";
 import { setupLogging } from "./logging.js";
-import { handleEventButton, createEvent, getEventByMessageId, saveEvent, ensureManage, lockEvent, closeEvent, setGroup, moveUser } from "./events.js";
+
+import {
+  handleEventButton,
+  createEvent,
+  getEventByMessageId,
+  saveEvent,
+  ensureManage,
+  lockEvent,
+  closeEvent,
+  setGroup,
+  moveUser,
+  refreshEventMessage,
+  removeUserFromEvent,
+  deleteEventFromStore,
+  deleteEventMessage,
+  joinWithClass
+} from "./events.js";
+
 import { clSet, clClear } from "./classLeaders.js";
 import { postChangelog } from "./changelog.js";
+
+import {
+  postRolePanel,
+  buildRolePanel,
+  buildRoleStatus,
+  ROLE_BTN,
+  ROLE_VIEW,
+  CLASSES,
+  WOW_ROLES,
+  WOW_VERSIONS,
+  COMMUNITY_ROLES
+} from "./roles.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) throw new Error("Mangler DISCORD_TOKEN i .env");
@@ -34,8 +65,7 @@ client.once("ready", async () => {
 async function registerCommands() {
   const rest = new REST({ version: "10" }).setToken(token);
   const appId = client.application.id;
-  const commands = buildCommands();
-  await rest.put(Routes.applicationCommands(appId), { body: commands });
+  await rest.put(Routes.applicationCommands(appId), { body: buildCommands() });
   console.log("Slash commands registered (global).");
 }
 
@@ -44,49 +74,26 @@ function findTextChannel(guild, name) {
   return ch && ch.isTextBased() ? ch : null;
 }
 
-function isMainRole(roleName) {
-  return roleName.startsWith("Main: ");
-}
-function isAltRole(roleName) {
-  return roleName.startsWith("Alt: ");
-}
-
-async function setMainClass(member, className) {
-  const desired = roleNameForMainClass(className);
-  const mainRoles = member.roles.cache.filter((r) => isMainRole(r.name));
-  for (const [, r] of mainRoles) await member.roles.remove(r);
-
-  const role = member.guild.roles.cache.find((r) => r.name === desired);
-  if (!role) throw new Error(`Fant ikke rolle: ${desired}`);
-
-  await member.roles.add(role);
+function canManageServer(member) {
+  if (!member) return false;
+  if (member.permissions?.has(PermissionsBitField.Flags.Administrator)) return true;
+  const names = new Set(member.roles.cache.map((r) => r.name));
+  return names.has("Admin") || names.has("Moderator") || names.has("Raidleder");
 }
 
-async function setAltClasses(member, selected) {
-  const desiredNames = new Set(selected.map((c) => roleNameForAltClass(c)));
-  const altRoles = member.roles.cache.filter((r) => isAltRole(r.name));
-
-  for (const [, r] of altRoles) {
-    if (!desiredNames.has(r.name)) await member.roles.remove(r);
-  }
-
-  for (const name of desiredNames) {
-    const role = member.guild.roles.cache.find((r) => r.name === name);
-    if (role && !member.roles.cache.has(role.id)) await member.roles.add(role);
-  }
+async function toggleByName(guild, member, roleName) {
+  const role = guild.roles.cache.find((r) => r.name === roleName);
+  if (!role) throw new Error(`Fant ikke rolle: ${roleName}`);
+  const has = member.roles.cache.has(role.id);
+  if (has) await member.roles.remove(role);
+  else await member.roles.add(role);
+  return !has;
 }
 
-async function setMultiRoleToggles(member, allowedNames, selectedNames) {
-  const desired = new Set(selectedNames);
-
-  for (const roleName of allowedNames) {
-    const role = member.guild.roles.cache.find((r) => r.name === roleName);
-    if (!role) continue;
-    const has = member.roles.cache.has(role.id);
-    const shouldHave = desired.has(roleName);
-
-    if (shouldHave && !has) await member.roles.add(role);
-    if (!shouldHave && has) await member.roles.remove(role);
+async function clearByNames(guild, member, names) {
+  for (const name of names) {
+    const role = guild.roles.cache.find((r) => r.name === name);
+    if (role && member.roles.cache.has(role.id)) await member.roles.remove(role);
   }
 }
 
@@ -94,6 +101,10 @@ client.on("interactionCreate", async (interaction) => {
   try {
     // Slash commands
     if (interaction.isChatInputCommand()) {
+      if (["setup", "apply", "post-verify", "post-role-menus", "post-welcome", "post-commands"].includes(interaction.commandName)) {
+        if (!canManageServer(interaction.member)) throw new Error("Ingen tilgang (krever Admin/Moderator/Raidleder).");
+      }
+
       if (interaction.commandName === "setup" || interaction.commandName === "apply") {
         await interaction.deferReply({ ephemeral: true });
         await applyTemplate(interaction.guild);
@@ -114,15 +125,96 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
         const ch = findTextChannel(interaction.guild, "velg-roller");
         if (!ch) throw new Error("Fant ikke #velg-roller.");
-        await postRoleMenus(ch);
-        await interaction.editReply("✅ Rollemenyer postet.");
+        await postRolePanel(ch);
+        await interaction.editReply("✅ Rollepanel postet (1 melding).");
+        return;
+      }
+
+      if (interaction.commandName === "post-welcome") {
+        await interaction.deferReply({ ephemeral: true });
+        const ch = findTextChannel(interaction.guild, "velkommen");
+        if (!ch) throw new Error("Fant ikke #velkommen.");
+
+        const msg = await ch.send(
+`👋 **Velkommen til ${interaction.guild.name}!**
+
+Dette er et norsk gaming-community (WoW + andre spill).
+
+**Start her:**
+1️⃣ Gå til **#verifisering** og trykk “Jeg godtar reglene”.
+2️⃣ Gå til **#velg-roller** og velg class/roller.
+
+**Hvor går du nå?**
+• Generell prat → #prat
+• WoW → #wow-prat
+• Finn gruppe → #lfg / #signups
+• Foreslå spill → #spill-forslag
+
+Skriv gjerne hei i #prat og si hva du spiller 👋`
+        );
+
+        await msg.pin().catch(() => {});
+        await interaction.editReply("✅ Velkomstmelding postet og pinnet.");
+        return;
+      }
+
+      if (interaction.commandName === "post-commands") {
+        await interaction.deferReply({ ephemeral: true });
+        const ch = findTextChannel(interaction.guild, "commands");
+        if (!ch) throw new Error("Fant ikke #commands.");
+
+        const text =
+`**KBot – Kommandooversikt**
+
+**Server / oppsett**
+• /setup – bygger/oppdater serverstruktur (idempotent)
+• /apply – resync med template.json (idempotent)
+• /post-verify – poster verifisering i #verifisering
+• /post-role-menus – poster rollepanel i #velg-roller
+• /post-welcome – poster og pinner velkomst i #velkommen
+• /post-commands – poster/oppdater denne oversikten i #commands
+
+**Changelog**
+• /changelog post text:<tekst> – poster i #changelog
+
+**Class leaders**
+• /cl set class:<klasse> user:<bruker> – sett CL for klasse (1 leder per klasse)
+• /cl clear user:<bruker> – fjern CL-roller fra bruker
+
+**Events**
+• /event create template:<...> when:"YYYY-MM-DD HH:mm" title:<...> note:<...>
+• /event lock message_id:<id>
+• /event unlock message_id:<id>
+• /event close message_id:<id>
+• /event group message_id:<id> user:<bruker> group:<1-5>
+• /event move message_id:<id> user:<bruker> target:<main|backup> role:<tank|healer|dps>
+• /event remove message_id:<id> user:<bruker>
+• /event delete message_id:<id>
+
+**Tips**
+• Message ID: høyreklikk melding → Copy Message ID (Developer Mode)
+`;
+
+        const pinned = await ch.messages.fetchPinned().catch(() => null);
+        const existing = pinned?.find(
+          (m) => m.author.id === interaction.client.user.id && m.content.startsWith("**KBot – Kommandooversikt**")
+        );
+
+        if (existing) {
+          await existing.edit(text);
+        } else {
+          const msg = await ch.send(text);
+          await msg.pin().catch(() => {});
+        }
+
+        await interaction.editReply("✅ #commands er oppdatert (og pinnet).");
         return;
       }
 
       if (interaction.commandName === "changelog") {
+        await interaction.deferReply({ ephemeral: true });
         const sub = interaction.options.getSubcommand();
         if (sub === "post") {
-          await interaction.deferReply({ ephemeral: true });
           const text = interaction.options.getString("text", true);
           await postChangelog(interaction, text);
           await interaction.editReply("✅ Postet i #changelog.");
@@ -165,7 +257,6 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
 
-        // Everything below requires manage
         ensureManage(interaction);
         await interaction.deferReply({ ephemeral: true });
 
@@ -173,36 +264,27 @@ client.on("interactionCreate", async (interaction) => {
         const evt = getEventByMessageId(messageId);
         if (!evt) throw new Error("Fant ikke event. Sjekk message_id.");
 
-        const channel = interaction.guild.channels.cache.get(evt.channelId);
-        if (!channel || !channel.isTextBased()) throw new Error("Fant ikke event-kanalen.");
-        const msg = await channel.messages.fetch(evt.messageId).catch(() => null);
-        if (!msg) throw new Error("Fant ikke event-meldingen (slettet?).");
-
         if (sub === "lock") {
           lockEvent(evt, true);
           saveEvent(messageId, evt);
-          await msg.edit({ embeds: msg.embeds ?? [], components: msg.components ?? [] }); // best-effort refresh
-          // Simple: re-fetch by simulating an edit from events module isn't exposed; just let staff press a button? no—do proper:
-          // We'll just re-render by calling msg.edit using events.js build via a local function is not exported; keep simple:
-          // Workaround: tell user to press a button won't. So instead, we do a quick trick: send "locked" info and rely on button handler to refresh later.
-          // But that's not acceptable. We'll do actual rebuild by importing buildEmbed/buildButtons isn't exported; so:
-          // Easiest: re-send message isn't desired. So instead export render helpers—keeping it simple now:
-          // We'll accept minimal: users see lock status only after next interaction. (Still works.)
-          await interaction.editReply("🔒 Event locked (status oppdateres ved neste interaksjon).");
+          await refreshEventMessage(interaction.guild, evt);
+          await interaction.editReply("🔒 Event locked.");
           return;
         }
 
         if (sub === "unlock") {
           lockEvent(evt, false);
           saveEvent(messageId, evt);
-          await interaction.editReply("🔓 Event unlocked (status oppdateres ved neste interaksjon).");
+          await refreshEventMessage(interaction.guild, evt);
+          await interaction.editReply("🔓 Event unlocked.");
           return;
         }
 
         if (sub === "close") {
           closeEvent(evt);
           saveEvent(messageId, evt);
-          await interaction.editReply("⛔ Event closed (status oppdateres ved neste interaksjon).");
+          await refreshEventMessage(interaction.guild, evt);
+          await interaction.editReply("⛔ Event closed.");
           return;
         }
 
@@ -211,7 +293,8 @@ client.on("interactionCreate", async (interaction) => {
           const group = interaction.options.getInteger("group", true);
           setGroup(evt, user.id, group);
           saveEvent(messageId, evt);
-          await interaction.editReply(`✅ Satte ${user.tag} til gruppe ${group} (status oppdateres ved neste interaksjon).`);
+          await refreshEventMessage(interaction.guild, evt);
+          await interaction.editReply(`✅ Satte ${user.tag} til gruppe ${group}.`);
           return;
         }
 
@@ -221,24 +304,24 @@ client.on("interactionCreate", async (interaction) => {
           const role = interaction.options.getString("role", true);
           moveUser(evt, user.id, target, role);
           saveEvent(messageId, evt);
+          await refreshEventMessage(interaction.guild, evt);
           await interaction.editReply(`✅ Flyttet ${user.tag} → ${target.toUpperCase()} (${role.toUpperCase()}).`);
           return;
         }
 
         if (sub === "remove") {
           const user = interaction.options.getUser("user", true);
-          // remove everywhere
-          // Instead of importing internals, just do what events.js does: emulate via moveUser? No; simplest:
-          // We'll use moveUser with no target isn't possible. We'll just reuse button leave logic by direct edit:
-          // Minimal: remove by moving to backup then leave? Not safe.
-          // For simplicity, do a local removal:
-          for (const k of ["tank", "healer", "dps"]) {
-            evt.main[k] = evt.main[k].filter((id) => id !== user.id);
-            evt.backup[k] = evt.backup[k].filter((id) => id !== user.id);
-          }
-          delete evt.groups[user.id];
+          removeUserFromEvent(evt, user.id);
           saveEvent(messageId, evt);
+          await refreshEventMessage(interaction.guild, evt);
           await interaction.editReply(`✅ Fjernet ${user.tag} fra event.`);
+          return;
+        }
+
+        if (sub === "delete") {
+          await deleteEventMessage(interaction.guild, evt);
+          deleteEventFromStore(messageId);
+          await interaction.editReply("🗑️ Event slettet (melding + data).");
           return;
         }
       }
@@ -246,6 +329,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // Buttons
     if (interaction.isButton()) {
+      // Verify
       if (interaction.customId === VERIFY_BUTTON_ID) {
         const role = interaction.guild.roles.cache.find((r) => r.name === "Verified");
         if (!role) throw new Error("Mangler Verified. Kjør /setup.");
@@ -261,47 +345,141 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      // Role Panel: switch view (tabs)
+      if (interaction.customId.startsWith(ROLE_BTN.VIEW_PREFIX)) {
+        const view = interaction.customId.slice(ROLE_BTN.VIEW_PREFIX.length);
+        if (!Object.values(ROLE_VIEW).includes(view)) {
+          await interaction.deferUpdate();
+          return;
+        }
+        await interaction.update(buildRolePanel(view));
+        return;
+      }
+
+      // Role Panel: status
+      if (interaction.customId === ROLE_BTN.STATUS) {
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+        await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+        return;
+      }
+
+      // Role Panel: toggles / clears
+      if (interaction.customId.startsWith("role_")) {
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+
+        if (interaction.customId.startsWith(ROLE_BTN.CLASS_PREFIX)) {
+          const cls = interaction.customId.slice(ROLE_BTN.CLASS_PREFIX.length);
+          if (!CLASSES.includes(cls)) throw new Error("Ugyldig class.");
+          await toggleByName(interaction.guild, member, cls);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId.startsWith(ROLE_BTN.WOWROLE_PREFIX)) {
+          const r = interaction.customId.slice(ROLE_BTN.WOWROLE_PREFIX.length);
+          if (!WOW_ROLES.includes(r)) throw new Error("Ugyldig WoW rolle.");
+          await toggleByName(interaction.guild, member, r);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId.startsWith(ROLE_BTN.WOWVER_PREFIX)) {
+          const v = interaction.customId.slice(ROLE_BTN.WOWVER_PREFIX.length);
+          if (!WOW_VERSIONS.includes(v)) throw new Error("Ugyldig versjon.");
+          await toggleByName(interaction.guild, member, v);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId.startsWith(ROLE_BTN.COMMUNITY_PREFIX)) {
+          const r = interaction.customId.slice(ROLE_BTN.COMMUNITY_PREFIX.length);
+          if (!COMMUNITY_ROLES.includes(r)) throw new Error("Ugyldig community-rolle.");
+          await toggleByName(interaction.guild, member, r);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId === ROLE_BTN.CLEAR_CLASS) {
+          await clearByNames(interaction.guild, member, CLASSES);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId === ROLE_BTN.CLEAR_WOW) {
+          await clearByNames(interaction.guild, member, WOW_ROLES);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId === ROLE_BTN.CLEAR_VERS) {
+          await clearByNames(interaction.guild, member, WOW_VERSIONS);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+
+        if (interaction.customId === ROLE_BTN.CLEAR_COMMUNITY) {
+          await clearByNames(interaction.guild, member, COMMUNITY_ROLES);
+          await interaction.reply({ content: buildRoleStatus(member), ephemeral: true });
+          return;
+        }
+      }
+
+      // Event join -> class picker
+      if (interaction.customId.startsWith("event_join:")) {
+        const roleKey = interaction.customId.split(":")[1]; // tank/healer/dps
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+
+        const picked = CLASSES.filter((c) => member.roles.cache.some((r) => r.name === c));
+        if (!picked.length) {
+          await interaction.reply({
+            content: "Velg minst én class i #velg-roller før du kan signe deg opp.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        const menu = new StringSelectMenuBuilder()
+          .setCustomId(`event_classpick:${interaction.message.id}:${roleKey}`)
+          .setPlaceholder("Velg class for signup")
+          .setMinValues(1)
+          .setMaxValues(1)
+          .addOptions(picked.map((c) => ({ label: c, value: c })));
+
+        await interaction.reply({
+          content: "Velg hvilken class du vil signe opp som:",
+          components: [new ActionRowBuilder().addComponents(menu)],
+          ephemeral: true
+        });
+        return;
+      }
+
+      // Event leave
       if (interaction.customId.startsWith("event_")) {
         await handleEventButton(interaction);
         return;
       }
     }
 
-    // Select menus (roles)
+    // Select menu: event class pick
     if (interaction.isStringSelectMenu()) {
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-
-      if (interaction.customId === ROLE_MENU.MAIN) {
+      if (interaction.customId.startsWith("event_classpick:")) {
+        const [, messageId, roleKey] = interaction.customId.split(":");
         const className = interaction.values[0];
-        if (!MAIN_CLASSES.includes(className)) throw new Error("Ugyldig main class.");
-        await setMainClass(member, className);
-        await interaction.reply({ content: `✅ Main class satt til ${className}.`, ephemeral: true });
-        return;
-      }
 
-      if (interaction.customId === ROLE_MENU.ALT) {
-        const selected = interaction.values;
-        for (const v of selected) if (!ALT_CLASSES.includes(v)) throw new Error("Ugyldig alt class.");
-        await setAltClasses(member, selected);
-        await interaction.reply({ content: `✅ Alt classes oppdatert.`, ephemeral: true });
-        return;
-      }
+        const evt = getEventByMessageId(messageId);
+        if (!evt) throw new Error("Fant ikke event (slettet?).");
 
-      if (interaction.customId === ROLE_MENU.WOW_ROLES) {
-        await setMultiRoleToggles(member, WOW_ROLES, interaction.values);
-        await interaction.reply({ content: `✅ WoW roller oppdatert.`, ephemeral: true });
-        return;
-      }
+        const result = joinWithClass(evt, interaction.user.id, roleKey, className);
+        saveEvent(messageId, evt);
+        await refreshEventMessage(interaction.guild, evt);
 
-      if (interaction.customId === ROLE_MENU.WOW_VERSIONS) {
-        await setMultiRoleToggles(member, WOW_VERSIONS, interaction.values);
-        await interaction.reply({ content: `✅ WoW versjoner oppdatert.`, ephemeral: true });
-        return;
-      }
-
-      if (interaction.customId === ROLE_MENU.COMMUNITY) {
-        await setMultiRoleToggles(member, COMMUNITY_ROLES, interaction.values);
-        await interaction.reply({ content: `✅ Community-roller oppdatert.`, ephemeral: true });
+        await interaction.update({
+          content:
+            result.placed === "main"
+              ? `✅ Signet som ${className} i MAIN (${roleKey.toUpperCase()}).`
+              : `🕒 Signet som ${className} i BACKUP (${roleKey.toUpperCase()}).`,
+          components: []
+        });
         return;
       }
     }

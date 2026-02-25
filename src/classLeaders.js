@@ -1,6 +1,6 @@
 import { PermissionsBitField } from "discord.js";
 
-export const CLASSES = ["Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid"];
+export const CLASSES = ["Warrior","Paladin","Hunter","Rogue","Priest","Shaman","Mage","Warlock","Druid"];
 
 function canManage(member) {
   if (!member) return false;
@@ -15,7 +15,7 @@ export async function clSet(interaction, className, user) {
   const role = interaction.guild.roles.cache.find((r) => r.name === roleName);
   if (!role) throw new Error(`Fant ikke rolle: ${roleName}`);
 
-  // En leder per klasse: fjern fra alle andre
+  // En leder per klasse: fjern fra alle andre først
   for (const [, m] of role.members) {
     if (m.id !== user.id) await m.roles.remove(role);
   }

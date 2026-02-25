@@ -3,6 +3,14 @@ import { EVENT_TEMPLATES } from "./events.js";
 import { CLASSES } from "./classLeaders.js";
 
 export function buildCommands() {
+  const setup = new SlashCommandBuilder().setName("setup").setDescription("Bygg/oppdater server (idempotent).");
+  const apply = new SlashCommandBuilder().setName("apply").setDescription("Resync med template.json (idempotent).");
+
+  const postVerify = new SlashCommandBuilder().setName("post-verify").setDescription("Post verifisering i #verifisering.");
+  const postRoles = new SlashCommandBuilder().setName("post-role-menus").setDescription("Post rollepanel i #velg-roller.");
+  const postWelcome = new SlashCommandBuilder().setName("post-welcome").setDescription("Post velkomstmelding i #velkommen.");
+  const postCommands = new SlashCommandBuilder().setName("post-commands").setDescription("Post/oppdater kommando-oversikt i #commands.");
+
   const event = new SlashCommandBuilder()
     .setName("event")
     .setDescription("Event commands")
@@ -67,7 +75,11 @@ export function buildCommands() {
             .setName("role")
             .setDescription("tank/healer/dps")
             .setRequired(true)
-            .addChoices({ name: "tank", value: "tank" }, { name: "healer", value: "healer" }, { name: "dps", value: "dps" })
+            .addChoices(
+              { name: "tank", value: "tank" },
+              { name: "healer", value: "healer" },
+              { name: "dps", value: "dps" }
+            )
         )
     )
     .addSubcommand((sc) =>
@@ -76,13 +88,13 @@ export function buildCommands() {
         .setDescription("Fjern bruker helt fra event.")
         .addStringOption((o) => o.setName("message_id").setDescription("Event message id").setRequired(true))
         .addUserOption((o) => o.setName("user").setDescription("Bruker").setRequired(true))
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName("delete")
+        .setDescription("Slett et event helt (melding + data).")
+        .addStringOption((o) => o.setName("message_id").setDescription("Event message id").setRequired(true))
     );
-
-  const setup = new SlashCommandBuilder().setName("setup").setDescription("Bygg/oppdater server (idempotent).");
-  const apply = new SlashCommandBuilder().setName("apply").setDescription("Resync med template.json (idempotent).");
-
-  const postVerify = new SlashCommandBuilder().setName("post-verify").setDescription("Post verifisering i #verifisering.");
-  const postRoles = new SlashCommandBuilder().setName("post-role-menus").setDescription("Post rollemenyer i #velg-roller.");
 
   const cl = new SlashCommandBuilder()
     .setName("cl")
@@ -115,5 +127,5 @@ export function buildCommands() {
         .addStringOption((o) => o.setName("text").setDescription("Tekst").setRequired(true))
     );
 
-  return [setup, apply, postVerify, postRoles, event, cl, changelog].map((c) => c.toJSON());
+  return [setup, apply, postVerify, postRoles, postWelcome, postCommands, event, cl, changelog].map((c) => c.toJSON());
 }

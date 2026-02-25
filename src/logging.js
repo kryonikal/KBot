@@ -31,7 +31,6 @@ export function setupLogging(client) {
 
     const added = [...newRoles].filter((id) => !oldRoles.has(id));
     const removed = [...oldRoles].filter((id) => !newRoles.has(id));
-
     if (!added.length && !removed.length) return;
 
     const addedNames = added.map((id) => newMember.guild.roles.cache.get(id)?.name).filter(Boolean);
